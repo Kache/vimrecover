@@ -1,0 +1,54 @@
+#!/bin/bash
+
+TIME=$(date +%s)
+TMPDIR=$(mktemp -d /tmp/vim-recovery_$TIME-XXXX)
+ORIG_PATH="$TMPDIR/orig_path.txt"
+RECOV_PATH="$TMPDIR/recov_path.txt"
+trap 'rm -rf $TMPDIR' 0 1 2 3 15
+
+for swpfile in ~/.vim/_temp/*.sw?; do
+  [ -f $swpfile ] || continue
+  rm -f $ORIG_PATH $RECOV_PATH
+
+  vim -X -E -s -n -r "$swpfile" \
+    -c "let orig_path=expand('%:p')" \
+    -c "let filename=expand('%:t')" \
+    -c "cd $TMPDIR" \
+    -c "saveas! \`=filename\`" \
+    -c "let recov_path=expand('%:p')" \
+    -c "new $ORIG_PATH | exec setline(1, orig_path) | w!" \
+    -c "new $RECOV_PATH | exec setline(1, recov_path) | w!" \
+    -c "qa!"
+
+  echo
+  if ! [ -f $ORIG_PATH -a -f $RECOV_PATH ]; then
+    echo "Error with $swpfile"
+    echo "  Skipping"
+    continue
+  fi
+
+  ORIGINAL=$(cat $ORIG_PATH)
+  echo "$ORIGINAL"
+
+  if [ ! -f $ORIGINAL ]; then
+    echo "  Original file missing or deleted"
+    echo "  Restoring file and deleting swap"
+    vim -X -E -s -n -r "$swpfile" -c "wq!"
+    rm -f $swpfile || exit
+    continue
+  fi
+
+  RECOVERED=$(cat $RECOV_PATH)
+  DIFFERENT=$(diff --brief $ORIGINAL $RECOVERED)
+
+  if [[ $DIFFERENT ]]; then
+    echo "  Changes recovered"
+    echo "  Diffing..."
+    mvim -f -n -d $ORIGINAL $RECOVERED 1>/dev/null
+    rm -i $swpfile || exit
+  else
+    echo "  Unchanged"
+    echo "  Deleting swap"
+    rm -f $swpfile || exit
+  fi
+done
